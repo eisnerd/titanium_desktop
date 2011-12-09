@@ -9,8 +9,11 @@ def git_description():
 	(out, err) = ps.communicate()
 	return out.strip()
 
-def make_titanium_version(v):
+def make_titanium_version(v, abbrev=True):
 	d=git_description()
+	if abbrev:
+		import itertools
+		d=list(itertools.islice(itertools.chain((d[:-len(i)] for i in map("".join, itertools.product("-.:~",["win","w","osx","mac","linux","lin","l","unix","dar","os2","os2-"],["","32","64"])) if d.endswith(i)), [d]), 1))[0]
 	return d if d.startswith(v) else v + ("" if len(d) == 0 or d[0] in ".-_~:" else ".") + d
 
 def update_titanium_version():
@@ -18,14 +21,15 @@ def update_titanium_version():
 	import re
 	o = open('sdk/__init__.py', 'w')
 	try:
-		r = re.compile("(.*)return\s*'([^']*)'\s*#VERSION")
+		r = re.compile("(.*return\s*')([^']*)('[^']*')([^']*)('\s*#VERSION.*)")
 		for l in fileinput.input('sdk/__init__.pyt'):
 			m = r.match(l)
 			if m:
 				o.write(m.group(1))
-				o.write("return '")
 				o.write(make_titanium_version(m.group(2)))
-				o.write("'\n")
+				o.write(m.group(3))
+				o.write(make_titanium_version(m.group(4), False))
+				o.write(m.group(5))
 			else:
 				o.write(l)
 	finally:
