@@ -27,6 +27,73 @@
 #include "TrayItemMac.h"
 #include "UserWindowMac.h"
 
+#include <stdio.h>
+#include <DiskArbitration/DiskArbitration.h>
+
+void printPair(const void* key, const void* value, void* context)
+{
+	printf("{\n");
+	CFShow(key);
+	CFShow(value);
+	printf("}\n");
+}
+
+void report_disk(DADiskRef disk, void *context, const char *event)
+{
+	CFDictionaryRef desc = DADiskCopyDescription(disk);
+	if (desc) {
+		CFDictionaryApplyFunction(desc, printPair, context);
+		printf("disk %s %s\n", DADiskGetBSDName(disk), event);
+		const void *v = CFDictionaryGetValue(desc, kDADiskDescriptionMediaLeafKey);
+		if (v && CFEqual(v, kCFBooleanTrue)) {
+			printf("disk %s is leafy\n", DADiskGetBSDName(disk));
+			v = CFDictionaryGetValue(desc, kDADiskDescriptionMediaRemovableKey);
+			if (v && CFEqual(v, kCFBooleanTrue)) {
+				printf("disk %s is removable\n", DADiskGetBSDName(disk));
+				v = CFDictionaryGetValue(desc, kDADiskDescriptionMediaWritableKey);
+				if (v && CFEqual(v, kCFBooleanTrue)) {
+					printf("disk %s is writable\n", DADiskGetBSDName(disk));
+					v = CFDictionaryGetValue(desc, kDADiskDescriptionMediaNetworkKey);
+					if (v && CFEqual(v, kCFBooleanFalse)) {
+						printf("disk %s is not networked\n", DADiskGetBSDName(disk));
+						v = CFDictionaryGetValue(desc, kDADiskDescriptionMediaKindKey);
+						if (v && !CFStringCompare((CFStringRef)v, CFSTR("IOMedia"), 0)) {
+							printf("disk %s is not optical\n", DADiskGetBSDName(disk));
+
+							char mount_point[PATH_MAX];
+							//v = CFDictionaryGetValue(desc, kDADiskDescriptionVolumeNameKey);
+							//if (v && CFGetTypeID(v) == CFStringGetTypeID())
+							v = CFDictionaryGetValue(desc, kDADiskDescriptionVolumePathKey);
+							if (v && CFGetTypeID(v) == CFURLGetTypeID())
+								CFURLGetFileSystemRepresentation((CFURLRef)v, true, (UInt8 *)mount_point, sizeof(mount_point));
+							else
+								mount_point[0] = 0;
+
+							printf("disk %s is at %s\n", DADiskGetBSDName(disk), mount_point);
+
+							//["/Volumes/" stringByAppendingString:v]
+							const char *vol = [(CFStringRef)v UTF8String];
+							printf("disk %s is at /Volumes/%s\n", DADiskGetBSDName(disk), vol);
+							GlobalObject::GetInstance()->FireEvent(event);
+						}
+					}
+				}
+			}
+		}
+	}
+	CFRelease(desc);
+}
+
+void hello_disk(DADiskRef disk, void *context)
+{
+	report_disk(disk, context, "device.added");
+}
+
+void goodbye_disk(DADiskRef disk, void *context)
+{
+	report_disk(disk, context, "device.removed");
+}
+
 @interface NSApplication (LegacyWarningSurpression)
 - (id) dockTile;
 @end
@@ -75,16 +142,25 @@ UIMac::UIMac()
     [NSURLProtocol registerClass:[TitaniumProtocols class]];
 
     // SECURITY FLAG: this will allow apps to have the same security
-    // as local files (like cross-domain XHR requests).  we should 
+    // as local files (like cross-domain XHR requests).  we should
     // make sure this is part of the upcoming security work
     [WebView registerURLSchemeAsLocal:@"app"];
     [WebView registerURLSchemeAsLocal:@"ti"];
+
+    session = DASessionCreate(kCFAllocatorDefault);
+
+    DARegisterDiskAppearedCallback(session, NULL, hello_disk, NULL);
+    DARegisterDiskDisappearedCallback(session, NULL, goodbye_disk, NULL);
+
+    DASessionScheduleWithRunLoop(session,
+        CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
 }
 
 UIMac::~UIMac()
 {
     [application release];
     [savedDockView release];
+    CFRelease(session);
 }
 
 AutoPtr<Menu> UIMac::CreateMenu()
@@ -371,7 +447,7 @@ long UIMac::GetIdleTime()
 void UIMac::ErrorDialog(string msg)
 {
     NSApplicationLoad();
-    NSRunCriticalAlertPanel(@"Application Error", 
+    NSRunCriticalAlertPanel(@"Application Error",
         [NSString stringWithUTF8String:msg.c_str()], nil, nil, nil);
     UI::ErrorDialog(msg);
 }

@@ -20,6 +20,7 @@ build.set_kroll_source_dir(path.abspath('kroll'))
 
 build.titanium_source_dir = path.abspath('.')
 build.titanium_sdk_dir = path.join(build.titanium_source_dir, 'sdk')
+build.titanium_sdk_package_version = sdk.get_titanium_version(False)
 
 # This should only be used for accessing various
 # scripts in the kroll build directory. All resources
